@@ -1,117 +1,110 @@
-/* App.jsx -------------------------------------------------------------- */
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
-import { FaHeart, FaRegHeart, FaCommentDots, FaShare, FaEllipsisV } from "react-icons/fa";
+import { ThumbsUp, ThumbsDown, Share2, MessageCircle, MoreVertical } from "lucide-react";
 
+
+/* Helpers ------------------------------------------------------------ */
+const getId = url => {
+  // youtube.com/shorts/xxxxxxxx or watch?v=xxxxxxxx
+  const match = url.match(/(?:shorts\/|watch\?v=)([A-Za-z0-9_-]{11})/);
+  return match ? match[1] : null;
+};
+
+const thumb = id => `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+
+/* Main component ----------------------------------------------------- */
 export default function App() {
   const [videos, setVideos] = useState([]);
+  const containerRef = useRef(null);
   const observerRef = useRef(null);
-  const listRef = useRef(null);
 
-  /* 1. fetch list once ------------------------------------------------- */
+  /* 1. fetch once */
   useEffect(() => {
     axios.get("http://localhost:5000/api/videos").then(res => setVideos(res.data));
   }, []);
 
-  /* 2. play/pause on visibility --------------------------------------- */
+  /* 2. play / pause on intersection (same trick as before) */
   useEffect(() => {
     if (!videos.length) return;
+
     observerRef.current = new IntersectionObserver(
-      entries =>
+      entries => {
         entries.forEach(entry => {
           const iframe = entry.target.querySelector("iframe");
           if (!iframe) return;
-          const play  = '{"event":"command","func":"playVideo","args":""}';
-          const pause = '{"event":"command","func":"pauseVideo","args":""}';
-          iframe.contentWindow?.postMessage(entry.isIntersecting ? play : pause, "*");
-        }),
-      { threshold: 0.65 }
+          const msg = entry.isIntersecting
+            ? `{"event":"command","func":"playVideo","args":""}`
+            : `{"event":"command","func":"pauseVideo","args":""}`;
+          iframe.contentWindow?.postMessage(msg, "*");
+        });
+      },
+      { threshold: 0.6 }
     );
-    listRef.current
-      .querySelectorAll(".short-card")
-      .forEach(card => observerRef.current.observe(card));
+
+    const slides = containerRef.current.querySelectorAll(".short-slide");
+    slides.forEach(s => observerRef.current.observe(s));
     return () => observerRef.current.disconnect();
   }, [videos]);
 
   if (!videos.length) {
     return (
-      <div className="flex items-center justify-center w-screen h-screen bg-black text-white">
+      <div className="w-screen h-screen flex items-center justify-center bg-black text-white">
         Loading…
       </div>
     );
   }
 
-  /* 3. UI -------------------------------------------------------------- */
   return (
     <div
-      ref={listRef}
-      className="
-        h-screen w-screen overflow-y-scroll
-        scroll-snap-y-mandatory touch-pan-y overscroll-y-contain
-        bg-black
-      "
+      ref={containerRef}
+      className="h-screen w-screen overflow-y-scroll scroll-snap-y-mandatory touch-pan-y overscroll-y-contain"
     >
-      {videos.map(v => (
-        <ShortCard key={v._id} v={v} />
-      ))}
+      {videos.map(v => {
+        const id = getId(v.url);
+        return (
+          <div key={v._id} className="short-slide h-screen w-screen scroll-snap-start relative">
+            {/* blurred BG */}
+            <div
+              className="absolute inset-0 -z-10 bg-center bg-cover blur-2xl brightness-50 scale-110"
+              style={{ backgroundImage: `url(${thumb(id)})` }}
+            />
+
+            {/* centered player (9/16) */}
+            <div className="h-full flex items-center justify-center">
+              <iframe
+                src={`https://www.youtube.com/embed/${id}?enablejsapi=1&autoplay=1&mute=1&playsinline=1&controls=0&modestbranding=1`}
+                title={v.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+                className="aspect-[9/16] h-full border-none rounded-lg shadow-lg"
+              />
+            </div>
+
+            {/* right‑side buttons */}
+            <div className="absolute right-4 bottom-24 flex flex-col items-center gap-5 text-white">
+              {[ThumbsUp, ThumbsDown, MessageCircle, Share2, MoreVertical].map((Icon, i) => (
+                <button key={i} className="flex flex-col items-center gap-1">
+                  <Icon size={28} strokeWidth={1.8} />
+                  <span className="text-xs">—</span>
+                </button>
+              ))}
+            </div>
+
+            {/* channel strip */}
+            <div className="absolute bottom-5 left-4 flex items-center gap-3 text-white">
+              <img
+                src={v.channelThumb || "/placeholder-avatar.png"}
+                alt=""
+                className="w-10 h-10 rounded-full"
+              />
+              <span className="font-semibold">{v.channelName || "Channel"}</span>
+              <button className="ml-4 px-4 py-1 bg-white text-black rounded-full text-sm font-bold">
+                Subscribe
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </div>
-  );
-}
-
-/* --------------------------------------------------------------------- */
-/* One full‑screen “slide”                                               */
-/* --------------------------------------------------------------------- */
-function ShortCard({ v }) {
-  return (
-    <div className="short-card relative h-screen w-screen flex-shrink-0 scroll-snap-start">
-      {/* video ---------------------------------------------------------- */}
-      <iframe
-        src={`${v.url}?autoplay=1&mute=1&controls=0&enablejsapi=1&playsinline=1&modestbranding=1`}
-        title={v.title}
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowFullScreen
-        className="h-full w-full object-cover"
-      />
-
-      {/* gradient overlays (top + bottom for readability) --------------- */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-transparent" />
-
-      {/* action rail (right) ------------------------------------------- */}
-      <div className="absolute right-2 top-1/3 flex flex-col items-center gap-5 text-white text-xl">
-        <ActionButton icon={FaRegHeart} label="Like" />
-        <ActionButton icon={FaHeart} label="Dislike" />
-        <ActionButton icon={FaCommentDots} label="Comments" />
-        <ActionButton icon={FaShare} label="Share" />
-        <ActionButton icon={FaEllipsisV} label="More" />
-      </div>
-
-      {/* bottom metadata bar ------------------------------------------- */}
-      <div className="absolute bottom-4 left-4 right-20 text-white flex items-center gap-3">
-        <img
-          src={v.channelAvatar || '/avatar.png'}
-          alt={v.channel}
-          className="w-10 h-10 rounded-full"
-        />
-        <div className="flex-1">
-          <div className="font-semibold">{v.channel}</div>
-          <div className="text-sm opacity-90">{v.title}</div>
-          <div className="text-xs opacity-70 mt-1">🎵 {v.track || "original sound"}</div>
-        </div>
-        <button className="px-4 py-1 bg-red-600 rounded-full font-semibold text-sm">
-          Subscribe
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* tiny helper --------------------------------------------------------- */
-function ActionButton({ icon: Icon, label }) {
-  return (
-    <button className="flex flex-col items-center gap-1">
-      <Icon className="text-3xl drop-shadow" />
-      <span className="text-xs">{label}</span>
-    </button>
   );
 }

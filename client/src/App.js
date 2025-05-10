@@ -1,110 +1,208 @@
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
-import { ThumbsUp, ThumbsDown, Share2, MessageCircle, MoreVertical } from "lucide-react";
+import {
+  ThumbsUp,
+  ThumbsDown,
+  MessageCircle,
+  Share2,
+  MoreVertical,
+} from "lucide-react";
 
+/*****************************************************
+ * Helper: extract YouTube 11‑char ID from a URL or raw ID
+ *****************************************************/
+function extractId(input = "") {
+  if (/^[A-Za-z0-9_-]{11}$/.test(input)) return input;
+  const m = input.match(
+    /(?:shorts\/|watch\?v=|embed\/|v\/|youtu\.be\/)([A-Za-z0-9_-]{11})/
+  );
+  return m ? m[1] : null;
+}
 
-/* Helpers ------------------------------------------------------------ */
-const getId = url => {
-  // youtube.com/shorts/xxxxxxxx or watch?v=xxxxxxxx
-  const match = url.match(/(?:shorts\/|watch\?v=)([A-Za-z0-9_-]{11})/);
-  return match ? match[1] : null;
-};
+/*****************************************************
+ * Control rail (play/pause, mute/unmute, icons)
+ *****************************************************/
+function ControlRail({ frameRef }) {
+  const [paused, setPaused] = useState(false);
+  const [muted, setMuted] = useState(true);
 
-const thumb = id => `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+  const post = (msg) =>
+    frameRef.current?.contentWindow?.postMessage(msg, "*");
 
-/* Main component ----------------------------------------------------- */
+  const togglePlay = () => {
+    post(
+      paused
+        ? '{"event":"command","func":"playVideo","args":""}'
+        : '{"event":"command","func":"pauseVideo","args":""}'
+    );
+    setPaused((p) => !p);
+  };
+
+  const toggleMute = () => {
+    post(
+      muted
+        ? '{"event":"command","func":"unMute","args":""}'
+        : '{"event":"command","func":"mute","args":""}'
+    );
+    setMuted((m) => !m);
+  };
+
+  const IconBtn = ({ onClick, children }) => (
+    <button onClick={onClick} className="active:scale-95">
+      {children}
+    </button>
+  );
+
+  return (
+    <div className="absolute right-3 bottom-28 flex flex-col items-center gap-5 text-white drop-shadow">
+      <IconBtn onClick={togglePlay}>{paused ? "▶️" : "⏸️"}</IconBtn>
+      <IconBtn onClick={toggleMute}>{muted ? "🔈" : "🔇"}</IconBtn>
+      {[ThumbsUp, ThumbsDown, MessageCircle, Share2, MoreVertical].map(
+        (I, idx) => (
+          <IconBtn key={idx} onClick={() => {}}>
+            <I size={30} strokeWidth={1.5} />
+          </IconBtn>
+        )
+      )}
+    </div>
+  );
+}
+
+/*****************************************************
+ * Single Short card component (own hooks allowed)
+ *****************************************************/
+function ShortCard({ video }) {
+  const id = extractId(video.videoId || video.url || "");
+  if (!id) return null;
+
+  const origin = encodeURIComponent(window.location.origin);
+  const src = `https://www.youtube.com/embed/${id}?playlist=${id}&loop=1&playsinline=1&autoplay=1&mute=1&controls=0&enablejsapi=1&origin=${origin}&modestbranding=1&rel=0`;
+
+  const frameRef = useRef(null);
+
+  return (
+    <div className="short-card relative h-screen w-screen flex-shrink-0 snap-start overflow-hidden">
+      <iframe
+        ref={frameRef}
+        src={src}
+        title={video.title || "Short"}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+        style={{
+          position: "absolute",
+          top: 0,
+          left: "50%",
+          transform: "translateX(-50%)",
+          height: "100vh",
+          width: "calc(100vh * 0.5625)",
+          pointerEvents: "none",
+        }}
+      />
+        ref={frameRef}
+        src={src}
+        title={video.title || "Short"}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+        style={{
+          position: "absolute",
+          top: 0,
+          left: "50%",
+          transform: "translateX(-50%)",
+          height: "100vh",
+          width: "calc(100vh * 0.5625)",
+          pointerEvents: "none",
+        }}
+      />
+
+      {/* gradients */}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-transparent" />
+
+      {/* controls */}
+      <ControlRail frameRef={frameRef} />
+
+      {/* metadata */}
+      <div className="absolute bottom-5 left-4 right-24 flex items-center gap-3 text-white">
+        <img
+          src={video.channelThumb || "/placeholder-avatar.png"}
+          alt="avatar"
+          className="w-10 h-10 rounded-full object-cover"
+        />
+        <div className="flex-1">
+          <div className="font-semibold leading-tight truncate max-w-[180px]">
+            {video.channelName || "Channel"}
+          </div>
+          <div className="text-sm opacity-90 leading-tight truncate max-w-[180px]">
+            {video.title || "Untitled"}
+          </div>
+        </div>
+        <button className="ml-2 px-4 py-1 bg-white text-black rounded-full text-sm font-semibold active:scale-95">
+          Subscribe
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/*****************************************************
+ * Main feed component
+ *****************************************************/
 export default function App() {
   const [videos, setVideos] = useState([]);
-  const containerRef = useRef(null);
-  const observerRef = useRef(null);
+  const listRef = useRef(null);
+  const ioRef = useRef(null);
 
-  /* 1. fetch once */
+  // fetch list
   useEffect(() => {
-    axios.get("http://localhost:5000/api/videos").then(res => setVideos(res.data));
+    const apiHost = process.env.REACT_APP_API_HOST || window.location.hostname;
+    axios
+      .get(`http://${apiHost}:5000/api/videos`)
+      .then((r) => setVideos(r.data || []))
+      .catch(console.error);
   }, []);
 
-  /* 2. play / pause on intersection (same trick as before) */
+  // intersection observer for play/pause
   useEffect(() => {
     if (!videos.length) return;
 
-    observerRef.current = new IntersectionObserver(
-      entries => {
-        entries.forEach(entry => {
-          const iframe = entry.target.querySelector("iframe");
-          if (!iframe) return;
+    ioRef.current = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const frame = entry.target.querySelector("iframe");
+          if (!frame) return;
           const msg = entry.isIntersecting
-            ? `{"event":"command","func":"playVideo","args":""}`
-            : `{"event":"command","func":"pauseVideo","args":""}`;
-          iframe.contentWindow?.postMessage(msg, "*");
+            ? '{"event":"command","func":"playVideo","args":""}'
+            : '{"event":"command","func":"pauseVideo","args":""}';
+          frame.contentWindow?.postMessage(msg, "*");
         });
       },
       { threshold: 0.6 }
     );
 
-    const slides = containerRef.current.querySelectorAll(".short-slide");
-    slides.forEach(s => observerRef.current.observe(s));
-    return () => observerRef.current.disconnect();
+    listRef.current
+      ?.querySelectorAll(".short-card")
+      .forEach((el) => ioRef.current.observe(el));
+
+    return () => ioRef.current.disconnect();
   }, [videos]);
 
   if (!videos.length) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center bg-black text-white">
+      <div className="flex items-center justify-center w-screen h-screen bg-black text-white">
         Loading…
       </div>
     );
   }
 
+  /* ------------------ UI ------------------ */
   return (
     <div
-      ref={containerRef}
-      className="h-screen w-screen overflow-y-scroll scroll-snap-y-mandatory touch-pan-y overscroll-y-contain"
+      ref={listRef}
+      className="flex flex-col snap-y snap-mandatory overflow-y-scroll h-screen min-h-[100dvh] w-screen bg-black"
     >
-      {videos.map(v => {
-        const id = getId(v.url);
-        return (
-          <div key={v._id} className="short-slide h-screen w-screen scroll-snap-start relative">
-            {/* blurred BG */}
-            <div
-              className="absolute inset-0 -z-10 bg-center bg-cover blur-2xl brightness-50 scale-110"
-              style={{ backgroundImage: `url(${thumb(id)})` }}
-            />
-
-            {/* centered player (9/16) */}
-            <div className="h-full flex items-center justify-center">
-              <iframe
-                src={`https://www.youtube.com/embed/${id}?enablejsapi=1&autoplay=1&mute=1&playsinline=1&controls=0&modestbranding=1`}
-                title={v.title}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-                className="aspect-[9/16] h-full border-none rounded-lg shadow-lg"
-              />
-            </div>
-
-            {/* right‑side buttons */}
-            <div className="absolute right-4 bottom-24 flex flex-col items-center gap-5 text-white">
-              {[ThumbsUp, ThumbsDown, MessageCircle, Share2, MoreVertical].map((Icon, i) => (
-                <button key={i} className="flex flex-col items-center gap-1">
-                  <Icon size={28} strokeWidth={1.8} />
-                  <span className="text-xs">—</span>
-                </button>
-              ))}
-            </div>
-
-            {/* channel strip */}
-            <div className="absolute bottom-5 left-4 flex items-center gap-3 text-white">
-              <img
-                src={v.channelThumb || "/placeholder-avatar.png"}
-                alt=""
-                className="w-10 h-10 rounded-full"
-              />
-              <span className="font-semibold">{v.channelName || "Channel"}</span>
-              <button className="ml-4 px-4 py-1 bg-white text-black rounded-full text-sm font-bold">
-                Subscribe
-              </button>
-            </div>
-          </div>
-        );
-      })}
+      {videos.map((v, idx) => (
+        <ShortCard key={v._id || idx} video={v} />
+      ))}
     </div>
   );
 }
